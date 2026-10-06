@@ -35,12 +35,14 @@
 ## 開發進度
 
 - 階段 0：工具與 npm 套件已安裝；GitHub CLI 已登入帳號 `Chen-Liang-Jie`；Git 作者為 JayChen。
-- 階段 1：已 `git init`（分支 `main`），建立 `.gitignore`、`.vscode/settings.json`、本檔。尚未任何 commit。
+- 階段 1：已 `git init`（分支 `main`），建立 `.gitignore`、`.vscode/settings.json`、本檔。
 - 階段 2：已建立 `supabase_init.sql`、`.github/workflows/keep-alive.yml`。SQL 只做過語法檢查，尚未在 Supabase 實際執行；使用者執行後應提供測試用 SQL 驗證 RPC。
 - 階段 3：已完成 `index.html`（本機展示模式經瀏覽器端對端測試通過）。
-- 階段 4：已用 CLI 建立 Supabase 組織 `Yujian Bento`、專案 `bento-system`（ref `mqcoayjbpghuwxvdpeda`，ap-northeast-1 東京），`supabase_init.sql` 已執行，URL 與 anon key 已寫入 `index.html`；以 anon key 測試讀取、下單、超賣防護、取消歸還庫存皆通過。DB 密碼與金鑰存於 `.env`（已 gitignore）。keep-alive 的 GitHub Secrets 待建立 GitHub 儲存庫後設定。
+- 階段 4：已用 CLI 建立 Supabase 組織 `Yujian Bento`、專案 `bento-system`（ref `mqcoayjbpghuwxvdpeda`，ap-northeast-1 東京），`supabase_init.sql` 已執行，URL 與 anon key 已寫入 `index.html`；以 anon key 測試讀取、下單、超賣防護、取消歸還庫存皆通過。DB 密碼與金鑰存於 `.env`（已 gitignore）。
 - CLI 注意：在 Claude Code 環境下 Supabase CLI 會自動切成 JSON 非互動模式，指令需加 `--agent no`；執行 SQL 用 `npx supabase db query --file <檔案> --linked --project-ref mqcoayjbpghuwxvdpeda --agent no`。
-- 下一步：等待使用者提供階段 4 指令。
+- 階段 4（部署）：已推送至 GitHub 公開儲存庫 https://github.com/Chen-Liang-Jie/bento-system ，GitHub Pages（main 分支根目錄）上線於 https://chen-liang-jie.github.io/bento-system/ 。keep-alive 的 `SUPABASE_URL`、`SUPABASE_ANON_KEY` 已設為 GitHub Secrets，手動觸發測試成功。
+- gh 注意：gh 安裝於 `C:\Program Files\GitHub CLI\gh.exe`，若終端機找不到 gh 需用完整路徑或重開 VS Code。
+- 下一步：等待使用者提供下一階段指令。
 
 ## 開發注意事項
 
