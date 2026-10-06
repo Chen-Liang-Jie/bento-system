@@ -1,0 +1,17 @@
+# 套件與建置輸出
+node_modules/
+dist/
+.venv/
+
+# 機密與本機資料
+.env
+*.db
+
+# 編輯器與系統檔（保留 Live Server 設定）
+.vscode/*
+!.vscode/settings.json
+.DS_Store
+*.log
+
+# Supabase CLI 暫存（專案連結資訊）
+supabase/.temp/

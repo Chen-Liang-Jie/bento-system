@@ -1,0 +1,1650 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>鈺見自然便當店｜線上點餐</title>
+  <meta name="description" content="鈺見自然便當店 素食便當線上點餐、年菜預購">
+  <meta name="theme-color" content="#16a34a">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍱</text></svg>">
+
+  <!-- =================================================================
+       【套件引入區】全部使用 CDN，Live Server 右鍵開啟與 GitHub Pages 都能直接運作
+       版本號與 package.json 對齊（Tailwind 例外，見下方說明）
+       ================================================================= -->
+
+  <!-- Google Fonts：思源黑體，中文字清楚好讀 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS v3 Play CDN（支援 tailwind.config 寫法；npm 安裝的是 v4，未來改 Vite 打包時再轉換） -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+
+  <!-- Vue 3（Global build，內含樣板編譯器） -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.5.43/dist/vue.global.prod.js"></script>
+
+  <!-- Supabase JS v2（雲端資料庫、RPC、Realtime） -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+
+  <!-- SheetJS（匯出 Excel；使用官方 CDN 0.20.3，npm registry 的舊版有已知漏洞） -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <!-- qrcodejs（後台產生店內點餐 QR Code） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <!-- =================================================================
+       【主題色設定區】所有品牌顏色集中在這裡，改這裡全站一起變
+       使用方式：bg-brand、text-accent、bg-brandLight、border-brand …
+       ================================================================= -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand:      '#16a34a', // 品牌主色：蔬食綠
+            brandLight: '#dcfce7', // 淺綠底色（標籤、選取狀態）
+            brandDark:  '#15803d', // 深綠（淺色底上的文字、按鈕按下）
+            accent:     '#ea580c'  // 強調色：暖橘（價格、結帳按鈕）
+          },
+          fontFamily: {
+            sans: ['"Noto Sans TC"', '"Microsoft JhengHei"', '"PingFang TC"', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- =================================================================
+       【系統設定區】★ 要切換成雲端模式，只要填這兩行 ★
+       - 兩個都空白：⚡ 本機展示模式（資料存在這台電腦的瀏覽器 LocalStorage）
+       - 兩個都填好：☁️ 雲端即時連線模式（Supabase 資料庫 + Realtime）
+       金鑰位置：Supabase Dashboard → Project Settings → API
+       ⚠ 只能填 anon / publishable key，絕對不要填 service_role / secret key！
+       ================================================================= -->
+  <script>
+    const SUPABASE_URL      = 'https://mqcoayjbpghuwxvdpeda.supabase.co';   // 例：'https://xxxxxxxx.supabase.co'
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xY29heWpicGdodXd4dmRwZWRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEzMDI5NDQsImV4cCI6MjEwNjg3ODk0NH0._l-fiEdE5Ih2wE7Xm9_8zg7T-5V63XCuJBs1jnU-uKo';   // 例：'eyJhbGciOi...' 或 'sb_publishable_...'
+
+    const SHOP_NAME = '鈺見自然便當店';
+    const ADMIN_PIN = '8888';       // 店家後台 4 位數 PIN 碼
+  </script>
+
+  <style>
+    [v-cloak] { display: none; }
+    body { -webkit-tap-highlight-color: transparent; }
+    /* 新訂單閃爍提示 */
+    @keyframes newOrderFlash { 0%, 100% { box-shadow: 0 0 0 0 rgba(234, 88, 12, 0); } 50% { box-shadow: 0 0 0 8px rgba(234, 88, 12, .55); } }
+    .flash-new { animation: newOrderFlash 1s ease-in-out 6; }
+    /* PIN 錯誤搖晃 */
+    @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-10px); } 75% { transform: translateX(10px); } }
+    .shake { animation: shake .3s ease-in-out 2; }
+  </style>
+</head>
+
+<body class="bg-stone-100 text-gray-900 font-sans text-lg antialiased">
+<noscript>
+  <p style="padding:24px;font-size:20px">本系統需要啟用 JavaScript 才能使用。</p>
+</noscript>
+
+<div id="app" v-cloak>
+
+  <!-- =================================================================
+       【頂部導覽列】店名 + 模式標示 + 顧客 / 店家視角切換
+       ================================================================= -->
+  <header class="sticky top-0 z-30 bg-white/95 backdrop-blur shadow-sm">
+    <div class="max-w-[1600px] mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-2 min-w-0 mr-auto">
+        <span class="text-3xl" aria-hidden="true">🍱</span>
+        <div class="min-w-0">
+          <h1 class="text-xl sm:text-2xl font-black text-brandDark truncate">{{ SHOP_NAME }}</h1>
+          <p class="text-xs sm:text-sm font-medium"
+             :class="mode === 'cloud' ? 'text-sky-700' : 'text-amber-700'">
+            {{ modeLabel }}
+          </p>
+        </div>
+      </div>
+
+      <!-- 視角切換 -->
+      <nav class="flex rounded-2xl bg-stone-100 p-1 text-base sm:text-lg font-bold">
+        <button type="button" @click="switchToCustomer"
+                class="px-3 sm:px-5 py-2 rounded-xl transition"
+                :class="view === 'customer' ? 'bg-brand text-white shadow' : 'text-gray-600'">
+          📱 顧客點餐
+        </button>
+        <button type="button" @click="switchToAdmin"
+                class="px-3 sm:px-5 py-2 rounded-xl transition"
+                :class="view === 'admin' ? 'bg-brand text-white shadow' : 'text-gray-600'">
+          {{ adminUnlocked ? '🖥️' : '🔒' }} 店家後台
+        </button>
+      </nav>
+
+      <button v-if="view === 'admin'" type="button" @click="lockAdmin"
+              class="px-4 py-2 rounded-xl border-2 border-gray-300 text-gray-700 font-bold text-base">
+        🔒 鎖定後台
+      </button>
+    </div>
+  </header>
+
+  <!-- 系統錯誤（例如雲端設定錯誤、套件載入失敗） -->
+  <div v-if="fatalError" class="m-4 sm:mx-auto max-w-3xl p-5 rounded-2xl bg-red-50 border-2 border-red-300 text-red-800">
+    <p class="font-bold text-xl mb-1">⚠ 系統無法啟動</p>
+    <p class="whitespace-pre-line">{{ fatalError }}</p>
+  </div>
+
+  <!-- 載入中 -->
+  <div v-else-if="loading" class="py-24 text-center text-2xl text-gray-500">
+    🍱 菜單載入中…
+  </div>
+
+  <!-- =================================================================
+       視角 A：【📱 顧客點餐介面】（Mobile-First）
+       ================================================================= -->
+  <main v-else-if="view === 'customer'"
+        class="max-w-6xl mx-auto px-4 pt-4 pb-32 lg:pb-10 lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
+
+    <!-- ---------- A-1 菜單區 ---------- -->
+    <section class="lg:col-span-2">
+
+      <!-- 分類篩選列 -->
+      <div class="sticky top-[var(--hdr,76px)] z-20 -mx-4 px-4 py-2 bg-stone-100/95 backdrop-blur">
+        <div class="flex gap-2 overflow-x-auto pb-1">
+          <button v-for="c in ['全部', ...CATEGORIES]" :key="c" type="button"
+                  @click="activeCategory = c"
+                  class="shrink-0 px-5 py-3 rounded-full text-lg font-bold border-2 transition"
+                  :class="activeCategory === c
+                          ? 'bg-brand border-brand text-white shadow'
+                          : 'bg-white border-gray-200 text-gray-700'">
+            {{ c }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 餐點卡片 -->
+      <div v-if="filteredProducts.length" class="grid sm:grid-cols-2 gap-4 mt-3">
+        <article v-for="p in filteredProducts" :key="p.id"
+                 class="bg-white rounded-3xl shadow-sm border border-stone-200 p-5 flex flex-col"
+                 :class="{ 'opacity-60': isSoldOut(p) }">
+
+          <!-- 標籤列：分類、素食別、剩餘份數 -->
+          <div class="flex flex-wrap items-center gap-2 text-sm font-bold">
+            <span class="px-3 py-1 rounded-full bg-stone-100 text-gray-700">{{ p.category }}</span>
+            <span class="px-3 py-1 rounded-full bg-brandLight text-brandDark">🌱 {{ p.diet_type }}</span>
+            <span class="ml-auto px-3 py-1 rounded-full"
+                  :class="isSoldOut(p) ? 'bg-gray-200 text-gray-600'
+                          : (p.stock <= 5 ? 'bg-orange-100 text-accent' : 'bg-stone-100 text-gray-700')">
+              {{ isSoldOut(p) ? '已售完' : '今日剩 ' + p.stock + ' 份' }}
+            </span>
+          </div>
+
+          <!-- 名稱與價格 -->
+          <h3 class="mt-3 text-2xl font-black leading-snug">{{ p.name }}</h3>
+          <p class="mt-1 text-3xl font-black text-accent">{{ money(p.price) }}</p>
+
+          <!-- 客製化選擇器（僅便當類） -->
+          <div v-if="hasCustomization(p) && !isSoldOut(p) && cardOpts[p.id]" class="mt-4 space-y-3">
+            <div>
+              <p class="text-sm font-bold text-gray-500 mb-1">飯量</p>
+              <div class="grid grid-cols-3 gap-2">
+                <button v-for="r in RICE_OPTIONS" :key="r" type="button"
+                        @click="cardOpts[p.id].rice = r"
+                        class="py-2 rounded-xl border-2 font-bold text-base transition"
+                        :class="cardOpts[p.id].rice === r
+                                ? 'border-brand bg-brandLight text-brandDark'
+                                : 'border-gray-200 text-gray-600'">
+                  {{ r }}
+                </button>
+              </div>
+            </div>
+            <div>
+              <p class="text-sm font-bold text-gray-500 mb-1">口味（可複選）</p>
+              <div class="grid grid-cols-2 gap-2">
+                <button v-for="x in EXTRA_OPTIONS" :key="x" type="button"
+                        @click="toggleExtra(p.id, x)"
+                        class="py-2 rounded-xl border-2 font-bold text-base transition"
+                        :class="cardOpts[p.id].extras.includes(x)
+                                ? 'border-accent bg-orange-50 text-accent'
+                                : 'border-gray-200 text-gray-600'">
+                  {{ cardOpts[p.id].extras.includes(x) ? '✓ ' : '' }}{{ x }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 加入購物車 / 已售完 -->
+          <div class="mt-auto pt-5">
+            <button v-if="isSoldOut(p)" type="button" disabled
+                    class="w-full py-4 rounded-2xl bg-gray-300 text-gray-600 text-xl font-bold cursor-not-allowed">
+              今日已售完
+            </button>
+            <button v-else-if="remaining(p) <= 0" type="button" disabled
+                    class="w-full py-4 rounded-2xl bg-gray-200 text-gray-600 text-xl font-bold cursor-not-allowed">
+              已達今日剩餘份數
+            </button>
+            <button v-else type="button" @click="addToCart(p)"
+                    class="w-full py-4 rounded-2xl bg-brand active:bg-brandDark text-white text-xl font-black shadow">
+              ＋ 加入購物車
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <p v-else class="mt-10 text-center text-xl text-gray-500">這個分類目前沒有餐點</p>
+    </section>
+
+    <!-- ---------- A-2 購物車與結帳區 ----------
+         手機：底部彈出抽屜；桌機（lg 以上）：右側固定欄 -->
+    <div v-if="cartOpen" class="fixed inset-0 z-40 bg-black/40 lg:hidden" @click="cartOpen = false"></div>
+
+    <aside class="bg-white shadow-xl lg:shadow-sm lg:border lg:border-stone-200
+                  lg:block lg:sticky lg:top-24 lg:bottom-auto lg:z-auto lg:rounded-3xl
+                  lg:max-h-[calc(100vh-7rem)] overflow-y-auto"
+           :class="cartOpen ? 'fixed inset-x-0 bottom-0 z-50 max-h-[90vh] rounded-t-3xl' : 'hidden'">
+      <div class="p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-2xl font-black">🛒 購物車</h2>
+          <button type="button" @click="cartOpen = false"
+                  class="lg:hidden w-12 h-12 rounded-full bg-stone-100 text-2xl" aria-label="關閉購物車">✕</button>
+        </div>
+
+        <!-- 購物車品項 -->
+        <p v-if="!cart.length" class="py-8 text-center text-gray-500">還沒有選擇餐點</p>
+        <ul v-else class="space-y-3">
+          <li v-for="line in cart" :key="line.key" class="p-3 rounded-2xl bg-stone-50 border border-stone-200">
+            <div class="flex items-start gap-2">
+              <div class="min-w-0 flex-1">
+                <p class="font-bold text-lg leading-snug">{{ line.name }}</p>
+                <p v-if="line.options.length" class="mt-1 flex flex-wrap gap-1">
+                  <span v-for="o in line.options" :key="o"
+                        class="px-2 py-0.5 rounded-lg bg-red-100 text-red-700 text-sm font-bold">{{ o }}</span>
+                </p>
+                <p v-if="lineProblem(line)" class="mt-1 text-sm font-bold text-red-600">⚠ {{ lineProblem(line) }}</p>
+              </div>
+              <p class="font-black text-accent text-lg">{{ money(linePrice(line) * line.qty) }}</p>
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <button type="button" @click="decLine(line)"
+                      class="w-12 h-12 rounded-xl bg-white border-2 border-gray-300 text-2xl font-black">−</button>
+              <span class="w-12 text-center text-2xl font-black">{{ line.qty }}</span>
+              <button type="button" @click="incLine(line)"
+                      class="w-12 h-12 rounded-xl bg-white border-2 border-gray-300 text-2xl font-black">＋</button>
+              <button type="button" @click="removeLine(line)"
+                      class="ml-auto px-3 py-2 text-base text-gray-500 underline">移除</button>
+            </div>
+          </li>
+        </ul>
+
+        <!-- 訂購資料 -->
+        <div class="mt-6 space-y-4">
+          <label class="block">
+            <span class="font-bold">稱呼 <span class="text-red-600">*</span></span>
+            <input v-model.trim="form.name" type="text" maxlength="50" autocomplete="name"
+                   placeholder="例：王小姐"
+                   class="mt-1 w-full px-4 py-3 rounded-xl border-2 border-gray-300 text-xl focus:border-brand focus:outline-none">
+          </label>
+
+          <label class="block">
+            <span class="font-bold">聯絡電話 <span class="text-red-600">*</span></span>
+            <input v-model.trim="form.phone" type="tel" inputmode="tel" maxlength="20" autocomplete="tel"
+                   placeholder="例：0912345678"
+                   class="mt-1 w-full px-4 py-3 rounded-xl border-2 border-gray-300 text-xl focus:border-brand focus:outline-none">
+          </label>
+
+          <div>
+            <p class="font-bold mb-1">取餐方式</p>
+            <div class="grid grid-cols-3 gap-2">
+              <button v-for="t in ORDER_TYPES" :key="t" type="button" @click="form.orderType = t"
+                      class="py-3 rounded-xl border-2 font-bold text-base transition"
+                      :class="form.orderType === t ? 'border-brand bg-brandLight text-brandDark' : 'border-gray-200 text-gray-600'">
+                {{ t }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 預計取餐時間：一般訂單 -->
+          <div v-if="form.orderType !== '年菜預訂'">
+            <p class="font-bold mb-1">預計取餐時間</p>
+            <div class="grid grid-cols-2 gap-2">
+              <button v-for="t in PICKUP_OPTIONS" :key="t" type="button" @click="form.pickup = t"
+                      class="py-3 rounded-xl border-2 font-bold text-base transition"
+                      :class="form.pickup === t ? 'border-brand bg-brandLight text-brandDark' : 'border-gray-200 text-gray-600'">
+                {{ t }}
+              </button>
+            </div>
+            <input v-if="form.pickup === '指定時間'" v-model="form.pickupClock" type="time"
+                   class="mt-2 w-full px-4 py-3 rounded-xl border-2 border-gray-300 text-xl focus:border-brand focus:outline-none">
+          </div>
+
+          <!-- 預計取餐時間：年菜預訂（需要日期） -->
+          <div v-else>
+            <p class="font-bold mb-1">預訂取貨日期與時間</p>
+            <input v-model="form.pickupDateTime" type="datetime-local"
+                   class="w-full px-4 py-3 rounded-xl border-2 border-gray-300 text-xl focus:border-brand focus:outline-none">
+          </div>
+        </div>
+
+        <!-- 錯誤訊息 -->
+        <p v-if="formError" class="mt-4 p-3 rounded-xl bg-red-50 border-2 border-red-200 text-red-700 font-bold">
+          ⚠ {{ formError }}
+        </p>
+
+        <!-- 合計與送出 -->
+        <div class="mt-5 pt-4 border-t-2 border-dashed border-gray-200">
+          <div class="flex items-end justify-between mb-3">
+            <span class="text-lg font-bold text-gray-600">合計（{{ cartCount }} 份）</span>
+            <span class="text-4xl font-black text-accent">{{ money(cartTotal) }}</span>
+          </div>
+          <button type="button" @click="submitOrder" :disabled="submitting || !cart.length"
+                  class="w-full py-5 rounded-2xl bg-accent text-white text-2xl font-black shadow-lg
+                         disabled:bg-gray-300 disabled:text-gray-500 disabled:shadow-none">
+            {{ submitting ? '送出中…' : '✅ 確認送出訂單' }}
+          </button>
+          <p class="mt-2 text-sm text-gray-500 text-center">實際金額以店家系統計算為準，取餐時付款</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 手機版：底部購物車按鈕 -->
+    <div v-if="cart.length && !cartOpen" class="fixed inset-x-0 bottom-0 z-30 p-3 bg-white/95 backdrop-blur shadow-[0_-4px_12px_rgba(0,0,0,.08)] lg:hidden">
+      <button type="button" @click="cartOpen = true"
+              class="w-full py-4 rounded-2xl bg-accent text-white text-xl font-black flex items-center justify-center gap-3">
+        🛒 查看購物車（{{ cartCount }} 份）<span class="text-2xl">{{ money(cartTotal) }}</span>
+      </button>
+    </div>
+  </main>
+
+  <!-- =================================================================
+       視角 B：【🖥️ 店家工作人員專區】（平板大字體）
+       ================================================================= -->
+  <main v-else-if="view === 'admin' && adminUnlocked" class="max-w-[1600px] mx-auto px-4 py-4 text-xl">
+
+    <!-- 提示音尚未啟用 -->
+    <button v-if="!soundReady" type="button" @click="testSound"
+            class="w-full mb-4 p-4 rounded-2xl bg-amber-100 border-2 border-amber-300 text-amber-900 font-bold text-left">
+      🔇 新訂單提示音尚未啟用（瀏覽器限制），請點這裡啟用 →
+    </button>
+
+    <!-- ---------- B-1 頂部 4 大看板 ---------- -->
+    <section class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- 1. 今日營業額 -->
+      <div class="rounded-3xl bg-white shadow-sm border border-stone-200 p-5">
+        <p class="text-base font-bold text-gray-500">💵 今日累積營業額</p>
+        <p class="mt-1 text-4xl xl:text-5xl font-black text-brandDark">{{ money(todayRevenue) }}</p>
+        <p class="mt-1 text-base text-gray-500">已收款 {{ money(todayPaidRevenue) }}（不含已取消）</p>
+      </div>
+      <!-- 2. 今日訂單數 -->
+      <div class="rounded-3xl bg-white shadow-sm border border-stone-200 p-5">
+        <p class="text-base font-bold text-gray-500">🧾 今日有效訂單 / 已完成</p>
+        <p class="mt-1 text-4xl xl:text-5xl font-black">
+          {{ todayValidOrders.length }}<span class="text-2xl text-gray-400"> 筆 / </span><span class="text-brandDark">{{ todayCompletedCount }}</span><span class="text-2xl text-gray-400"> 筆</span>
+        </p>
+        <p class="mt-1 text-base text-gray-500">待處理 {{ activeOrders.length }} 筆</p>
+      </div>
+      <!-- 3. 匯出 Excel -->
+      <button type="button" @click="exportExcel"
+              class="rounded-3xl bg-brand active:bg-brandDark text-white shadow p-5 text-left">
+        <p class="text-4xl">📊</p>
+        <p class="mt-2 text-2xl font-black leading-tight">匯出今日 Excel 報表</p>
+      </button>
+      <!-- 4. QR Code -->
+      <button type="button" @click="openQr"
+              class="rounded-3xl bg-accent text-white shadow p-5 text-left">
+        <p class="text-4xl">📱</p>
+        <p class="mt-2 text-2xl font-black leading-tight">顯示店內點餐 QR Code</p>
+      </button>
+    </section>
+
+    <!-- 本機展示模式工具 -->
+    <div v-if="mode === 'local'" class="mt-4 p-4 rounded-2xl bg-amber-50 border-2 border-amber-200 text-base text-amber-900 flex flex-wrap items-center gap-3">
+      <span class="font-bold">⚡ 本機展示模式：</span>
+      <span class="flex-1 min-w-[16rem]">資料只存在這台電腦的瀏覽器中。可另開一個分頁當「顧客端」下單，這裡會即時收到並響鈴。</span>
+      <button type="button" @click="resetDemoData" class="px-4 py-2 rounded-xl bg-white border-2 border-amber-300 font-bold">
+        ↺ 重設展示資料
+      </button>
+    </div>
+
+    <div class="mt-6 grid lg:grid-cols-3 gap-6 items-start">
+
+      <!-- ---------- B-2 即時訂單佇列（KDS），佔 2/3 ---------- -->
+      <section class="lg:col-span-2">
+        <div class="flex flex-wrap items-center gap-3 mb-4">
+          <h2 class="text-3xl font-black mr-auto">👨‍🍳 即時訂單</h2>
+          <button type="button" @click="testSound"
+                  class="px-4 py-3 rounded-xl bg-white border-2 border-gray-300 font-bold text-lg">
+            🔊 測試提示音
+          </button>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mb-4">
+          <button v-for="f in ORDER_FILTERS" :key="f.key" type="button" @click="orderFilter = f.key"
+                  class="py-3 rounded-2xl border-2 font-bold text-lg transition"
+                  :class="orderFilter === f.key ? 'bg-gray-900 border-gray-900 text-white' : 'bg-white border-gray-200 text-gray-700'">
+            {{ f.label }}
+            <span class="ml-1 inline-block min-w-[2rem] px-2 rounded-full text-base"
+                  :class="orderFilter === f.key ? 'bg-white/20' : 'bg-stone-100'">{{ filterCount(f.key) }}</span>
+          </button>
+        </div>
+
+        <p v-if="!kdsOrders.length" class="py-16 text-center text-2xl text-gray-400 bg-white rounded-3xl border-2 border-dashed border-gray-200">
+          {{ orderFilter === 'active' ? '目前沒有待處理的訂單 ☕' : '沒有符合的訂單' }}
+        </p>
+
+        <div class="space-y-4">
+          <article v-for="o in kdsOrders" :key="o.id"
+                   class="bg-white rounded-3xl shadow-sm border border-stone-200 border-l-[12px] p-5"
+                   :class="[STATUS_STYLE[o.status].border, { 'flash-new': flashIds[o.id] }]">
+
+            <!-- 號碼、狀態、時間 -->
+            <div class="flex flex-wrap items-start gap-x-4 gap-y-2">
+              <p class="text-6xl font-black tracking-tight"
+                 :class="o.status === 'CANCELLED' ? 'line-through text-gray-400' : ''">{{ o.order_no }}</p>
+              <div class="flex flex-wrap gap-2 pt-2">
+                <span class="px-3 py-1 rounded-full font-bold text-lg" :class="STATUS_STYLE[o.status].badge">
+                  {{ STATUS_STYLE[o.status].label }}
+                </span>
+                <span class="px-3 py-1 rounded-full font-bold text-lg bg-stone-100 text-gray-800">{{ o.order_type }}</span>
+                <span v-if="o.is_paid" class="px-3 py-1 rounded-full font-bold text-lg bg-brandLight text-brandDark">已收款</span>
+              </div>
+              <div class="ml-auto text-right">
+                <p class="text-base text-gray-500">下單時間</p>
+                <p class="text-3xl font-black">{{ orderTimeLabel(o.created_at) }}</p>
+              </div>
+            </div>
+
+            <!-- 取餐時間與顧客 -->
+            <div class="mt-3 grid sm:grid-cols-2 gap-2 text-xl">
+              <p class="font-bold">⏰ {{ o.pickup_time }}</p>
+              <p class="font-bold">
+                👤 {{ o.customer_name }}
+                <a :href="'tel:' + o.customer_phone" class="ml-2 text-sky-700 underline">📞 {{ o.customer_phone }}</a>
+              </p>
+            </div>
+
+            <!-- 便當明細：客製化以紅底大字標示 -->
+            <ul class="mt-4 space-y-2">
+              <li v-for="(it, idx) in o.items_json" :key="idx"
+                  class="flex flex-wrap items-center gap-2 p-3 rounded-2xl bg-stone-50">
+                <span class="text-2xl font-black">{{ it.name }}</span>
+                <span class="text-3xl font-black text-accent">× {{ it.qty }}</span>
+                <span v-for="op in (it.options || [])" :key="op"
+                      class="px-3 py-1 rounded-xl bg-red-600 text-white text-2xl font-black">【{{ op }}】</span>
+              </li>
+            </ul>
+
+            <!-- 金額與操作按鈕 -->
+            <div class="mt-4 flex flex-wrap items-center gap-3">
+              <p class="text-3xl font-black mr-auto">總計 {{ money(o.total_amount) }}</p>
+            </div>
+
+            <div v-if="o.status === 'PENDING' || o.status === 'PREPARING'" class="mt-3 grid grid-cols-4 gap-3">
+              <button v-if="o.status === 'PENDING'" type="button" :disabled="busy[o.id]" @click="acceptOrder(o)"
+                      class="col-span-3 py-6 rounded-2xl bg-blue-600 active:bg-blue-700 text-white text-2xl font-black shadow disabled:opacity-50">
+                👨‍🍳 確認接單（開始包便當）
+              </button>
+              <button v-else type="button" :disabled="busy[o.id]" @click="completeOrder(o)"
+                      class="col-span-3 py-6 rounded-2xl bg-green-600 active:bg-green-700 text-white text-2xl font-black shadow disabled:opacity-50">
+                💰 收款並完成取餐（{{ money(o.total_amount) }}）
+              </button>
+              <button type="button" :disabled="busy[o.id]" @click="cancelOrder(o)"
+                      class="py-6 rounded-2xl border-2 border-red-300 text-red-600 text-xl font-bold disabled:opacity-50">
+                取消訂單
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- B-3 商品庫存與菜單管理，佔 1/3 ---------- -->
+      <section>
+        <div class="flex items-center gap-3 mb-4">
+          <h2 class="text-3xl font-black mr-auto">📦 庫存管理</h2>
+        </div>
+        <button type="button" @click="openNewProduct"
+                class="w-full mb-4 py-4 rounded-2xl bg-brand active:bg-brandDark text-white text-2xl font-black shadow">
+          ➕ 新增便當 / 年菜
+        </button>
+
+        <div class="space-y-4">
+          <div v-for="p in sortedProducts" :key="p.id"
+               class="bg-white rounded-3xl shadow-sm border border-stone-200 p-4">
+            <div class="flex items-start gap-2">
+              <div class="min-w-0 flex-1">
+                <p class="text-2xl font-black leading-snug">{{ p.name }}</p>
+                <p class="text-base text-gray-500">
+                  {{ p.category }} · {{ p.diet_type }} · {{ money(p.price) }}<span v-if="p.pos_code"> · POS {{ p.pos_code }}</span>
+                </p>
+              </div>
+              <button type="button" @click="openEditProduct(p)"
+                      class="px-4 py-2 rounded-xl border-2 border-gray-300 font-bold text-lg">編輯</button>
+            </div>
+
+            <!-- 一鍵上下架 -->
+            <button type="button" :disabled="busy['p' + p.id]" @click="toggleAvailable(p)"
+                    class="mt-3 w-full py-4 rounded-2xl text-2xl font-black border-2 disabled:opacity-50"
+                    :class="p.is_available
+                            ? 'bg-green-50 border-green-500 text-green-700'
+                            : 'bg-red-50 border-red-400 text-red-600'">
+              {{ p.is_available ? '🟢 供應中' : '🔴 已停售' }}
+            </button>
+
+            <!-- 快速改庫存 -->
+            <div class="mt-3 grid grid-cols-5 gap-2">
+              <button v-for="d in [-5, -1]" :key="d" type="button" :disabled="busy['p' + p.id]"
+                      @click="adjustStock(p, d)"
+                      class="py-4 rounded-xl bg-stone-100 active:bg-stone-200 text-xl font-black disabled:opacity-50">{{ d }}</button>
+              <button type="button" :disabled="busy['p' + p.id]" @click="setStockPrompt(p)"
+                      class="py-2 rounded-xl border-2 text-center disabled:opacity-50"
+                      :class="p.stock === 0 ? 'border-red-400 text-red-600' : (p.stock <= 5 ? 'border-accent text-accent' : 'border-gray-300')"
+                      title="點擊直接輸入庫存">
+                <span class="block text-3xl font-black leading-none">{{ p.stock }}</span>
+                <span class="block text-xs text-gray-500 mt-1">庫存</span>
+              </button>
+              <button v-for="d in [1, 10]" :key="d" type="button" :disabled="busy['p' + p.id]"
+                      @click="adjustStock(p, d)"
+                      class="py-4 rounded-xl bg-stone-100 active:bg-stone-200 text-xl font-black disabled:opacity-50">+{{ d }}</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- =================================================================
+       【彈出視窗區】
+       ================================================================= -->
+
+  <!-- 下單成功：超大取餐號碼 -->
+  <div v-if="successOrder" class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 text-center">
+      <p class="text-2xl font-bold text-brandDark">✅ 訂單已送出！</p>
+      <p class="mt-4 text-xl text-gray-600">您的取餐號碼</p>
+      <p class="text-8xl sm:text-9xl font-black text-brand leading-none my-3">{{ successOrder.order_no }}</p>
+      <div class="mt-4 p-4 rounded-2xl bg-stone-50 text-left space-y-1 text-lg">
+        <p>👤 {{ successOrder.name }}</p>
+        <p>🥡 {{ successOrder.orderType }}</p>
+        <p>⏰ {{ successOrder.pickupText }}</p>
+        <p class="text-2xl font-black text-accent pt-1">應付金額 {{ money(successOrder.total) }}</p>
+      </div>
+      <p class="mt-4 text-lg font-bold text-gray-700">請記下號碼，取餐時告訴店員即可 🙏</p>
+      <button type="button" @click="successOrder = null"
+              class="mt-5 w-full py-5 rounded-2xl bg-brand text-white text-2xl font-black">好的，我知道了</button>
+    </div>
+  </div>
+
+  <!-- PIN 碼解鎖 -->
+  <div v-if="pinOpen" class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-white rounded-3xl shadow-2xl p-6 text-center">
+      <p class="text-2xl font-black">🔒 店家後台</p>
+      <p class="mt-1 text-lg text-gray-600">請輸入 4 位數 PIN 碼</p>
+
+      <div class="my-5 flex justify-center gap-4" :class="{ shake: pinShake }">
+        <span v-for="i in 4" :key="i" class="w-6 h-6 rounded-full border-4"
+              :class="pinInput.length >= i ? 'bg-brand border-brand' : 'border-gray-300'"></span>
+      </div>
+      <p class="h-7 text-lg font-bold text-red-600">{{ pinError }}</p>
+
+      <div class="grid grid-cols-3 gap-3 mt-2">
+        <button v-for="n in ['1','2','3','4','5','6','7','8','9']" :key="n" type="button" @click="pinPress(n)"
+                class="py-5 rounded-2xl bg-stone-100 active:bg-stone-200 text-3xl font-black">{{ n }}</button>
+        <button type="button" @click="pinInput = ''" class="py-5 rounded-2xl bg-stone-100 text-xl font-bold">清除</button>
+        <button type="button" @click="pinPress('0')" class="py-5 rounded-2xl bg-stone-100 active:bg-stone-200 text-3xl font-black">0</button>
+        <button type="button" @click="pinInput = pinInput.slice(0, -1)" class="py-5 rounded-2xl bg-stone-100 text-2xl font-bold" aria-label="刪除">⌫</button>
+      </div>
+      <button type="button" @click="closePin" class="mt-4 w-full py-4 rounded-2xl border-2 border-gray-300 text-xl font-bold">取消</button>
+    </div>
+  </div>
+
+  <!-- 新增 / 編輯商品 -->
+  <div v-if="editForm" class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+    <div class="w-full max-w-lg max-h-[95vh] overflow-y-auto bg-white rounded-3xl shadow-2xl p-6 text-xl">
+      <p class="text-3xl font-black mb-4">{{ editForm.id ? '✏️ 編輯品項' : '➕ 新增品項' }}</p>
+
+      <div class="space-y-4">
+        <label class="block">
+          <span class="font-bold">名稱 <span class="text-red-600">*</span></span>
+          <input v-model.trim="editForm.name" type="text" maxlength="50"
+                 class="mt-1 w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-brand focus:outline-none">
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block">
+            <span class="font-bold">價格（元） <span class="text-red-600">*</span></span>
+            <input v-model.number="editForm.price" type="number" min="0" step="1" inputmode="numeric"
+                   class="mt-1 w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-brand focus:outline-none">
+          </label>
+          <label v-if="!editForm.id" class="block">
+            <span class="font-bold">初始庫存</span>
+            <input v-model.number="editForm.stock" type="number" min="0" step="1" inputmode="numeric"
+                   class="mt-1 w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-brand focus:outline-none">
+          </label>
+          <label class="block">
+            <span class="font-bold">POS 碼</span>
+            <input v-model.trim="editForm.pos_code" type="text" maxlength="20" placeholder="例：B07"
+                   class="mt-1 w-full px-4 py-3 rounded-xl border-2 border-gray-300 focus:border-brand focus:outline-none">
+          </label>
+        </div>
+        <div>
+          <p class="font-bold mb-1">分類</p>
+          <div class="grid grid-cols-3 gap-2">
+            <button v-for="c in CATEGORIES" :key="c" type="button" @click="editForm.category = c"
+                    class="py-3 rounded-xl border-2 font-bold text-lg"
+                    :class="editForm.category === c ? 'border-brand bg-brandLight text-brandDark' : 'border-gray-200 text-gray-600'">{{ c }}</button>
+          </div>
+        </div>
+        <div>
+          <p class="font-bold mb-1">素食別</p>
+          <div class="grid grid-cols-4 gap-2">
+            <button v-for="d in DIET_TYPES" :key="d" type="button" @click="editForm.diet_type = d"
+                    class="py-3 rounded-xl border-2 font-bold text-lg"
+                    :class="editForm.diet_type === d ? 'border-brand bg-brandLight text-brandDark' : 'border-gray-200 text-gray-600'">{{ d }}</button>
+          </div>
+        </div>
+      </div>
+
+      <p v-if="editError" class="mt-4 p-3 rounded-xl bg-red-50 border-2 border-red-200 text-red-700 font-bold text-lg">⚠ {{ editError }}</p>
+
+      <div class="mt-6 grid grid-cols-2 gap-3">
+        <button type="button" @click="editForm = null" class="py-4 rounded-2xl border-2 border-gray-300 font-bold">取消</button>
+        <button type="button" :disabled="editSaving" @click="saveProductForm"
+                class="py-4 rounded-2xl bg-brand text-white font-black disabled:opacity-50">
+          {{ editSaving ? '儲存中…' : '💾 儲存' }}
+        </button>
+      </div>
+      <button v-if="editForm.id" type="button" :disabled="editSaving" @click="deleteProductForm"
+              class="mt-3 w-full py-4 rounded-2xl border-2 border-red-300 text-red-600 font-bold disabled:opacity-50">
+        🗑️ 刪除此品項
+      </button>
+    </div>
+  </div>
+
+  <!-- 店內點餐 QR Code -->
+  <div v-if="qrOpen" class="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 text-center">
+      <p class="text-3xl font-black">📱 掃碼點餐</p>
+      <p class="mt-1 text-lg text-gray-600">{{ SHOP_NAME }}</p>
+      <div ref="qrBox" class="my-5 mx-auto w-64 h-64 flex items-center justify-center"></div>
+      <p class="text-sm text-gray-500 break-all">{{ orderUrl }}</p>
+      <p v-if="isLocalhostUrl" class="mt-3 p-3 rounded-xl bg-amber-50 border-2 border-amber-200 text-amber-900 text-base text-left">
+        ⚠ 目前是本機網址，手機掃了會打不開。等網站部署到 GitHub Pages 後，再從正式網址開啟後台產生 QR Code。
+      </p>
+      <div class="mt-5 grid grid-cols-2 gap-3 text-lg">
+        <button type="button" @click="downloadQr" class="py-4 rounded-2xl bg-brand text-white font-bold">⬇️ 下載圖片</button>
+        <button type="button" @click="printQr" class="py-4 rounded-2xl bg-stone-100 font-bold">🖨️ 列印</button>
+        <button type="button" @click="copyOrderUrl" class="py-4 rounded-2xl bg-stone-100 font-bold">🔗 複製連結</button>
+        <a :href="lineShareUrl" target="_blank" rel="noopener" class="py-4 rounded-2xl bg-[#06C755] text-white font-bold">💬 分享到 LINE</a>
+      </div>
+      <button type="button" @click="qrOpen = false" class="mt-3 w-full py-4 rounded-2xl border-2 border-gray-300 text-xl font-bold">關閉</button>
+    </div>
+  </div>
+
+  <!-- 浮動提示訊息 -->
+  <transition enter-from-class="opacity-0 -translate-y-4" leave-to-class="opacity-0 -translate-y-4">
+    <div v-if="toast" class="fixed top-24 left-1/2 -translate-x-1/2 z-[70] max-w-[90vw] px-6 py-4 rounded-2xl shadow-2xl text-xl font-bold transition duration-300"
+         :class="toast.type === 'error' ? 'bg-red-600 text-white' : (toast.type === 'alert' ? 'bg-accent text-white' : 'bg-gray-900 text-white')">
+      {{ toast.text }}
+    </div>
+  </transition>
+</div>
+
+<script>
+/* =====================================================================
+   鈺見自然便當店 - 前後台系統主程式（Vue 3 Composition API）
+   結構：
+     1. 常數與選項（分類、客製化選項、狀態樣式…）
+     2. 工具函式（台灣時間、金額格式…）
+     3. 資料存取層：localApi（本機展示）/ cloudApi（Supabase），介面一致
+     4. Vue App：顧客點餐、購物車、後台 KDS、庫存管理、報表、QR Code、提示音
+   ===================================================================== */
+const { createApp, ref, reactive, computed, onMounted, nextTick } = Vue;
+
+/* ---------------------------------------------------------------------
+   1. 常數與選項（要新增選項改這裡）
+   --------------------------------------------------------------------- */
+const CATEGORIES     = ['招牌便當', '單點/湯品', '年菜預購'];
+const DIET_TYPES     = ['全素', '蛋素', '奶素', '蛋奶素'];
+const CUSTOM_CATEGORIES = ['招牌便當'];             // 哪些分類顯示飯量/口味選擇器
+const RICE_OPTIONS   = ['正常飯量', '飯少', '飯多'];  // 單選；「正常飯量」不會寫進備註
+const EXTRA_OPTIONS  = ['不加素滷汁', '要加辣'];      // 可複選
+const ORDER_TYPES    = ['外帶自取', '現場內用', '年菜預訂'];
+const PICKUP_OPTIONS = ['立即製作', '15分鐘後', '30分鐘後', '指定時間'];
+const ACTIVE_STATUSES = ['PENDING', 'PREPARING'];
+
+const ORDER_FILTERS = [
+  { key: 'active', label: '待處理' },
+  { key: 'done',   label: '已完成/取消' },
+  { key: 'all',    label: '全部' }
+];
+
+const STATUS_STYLE = {
+  PENDING:   { label: '🆕 新訂單', badge: 'bg-blue-100 text-blue-800',   border: 'border-l-blue-500' },
+  PREPARING: { label: '🍳 製作中', badge: 'bg-amber-100 text-amber-800', border: 'border-l-amber-500' },
+  COMPLETED: { label: '✅ 已完成', badge: 'bg-green-100 text-green-800', border: 'border-l-green-500' },
+  CANCELLED: { label: '✖ 已取消',  badge: 'bg-gray-200 text-gray-600',   border: 'border-l-gray-300' }
+};
+
+// 本機展示模式的預設菜單（與 supabase_init.sql 的預設商品相同）
+const DEMO_PRODUCTS = [
+  { id: 1, name: '素G排便當',   category: '招牌便當', diet_type: '全素', price: 100, stock: 25, pos_code: 'B01' },
+  { id: 2, name: '薯餅便當',     category: '招牌便當', diet_type: '全素', price: 100, stock: 20, pos_code: 'B02' },
+  { id: 3, name: '蔬菜排便當',   category: '招牌便當', diet_type: '全素', price: 100, stock: 20, pos_code: 'B03' },
+  { id: 4, name: '素D排便當',    category: '招牌便當', diet_type: '全素', price: 100, stock: 25, pos_code: 'B04' },
+  { id: 5, name: '白帶魚便當',   category: '招牌便當', diet_type: '全素', price: 100, stock: 15, pos_code: 'B05' },
+  { id: 6, name: '素鱈魚便當',   category: '招牌便當', diet_type: '全素', price: 100, stock: 15, pos_code: 'B06' },
+  { id: 7, name: '吉祥團圓素食年菜組 (六菜一湯)', category: '年菜預購', diet_type: '全素', price: 2880, stock: 10, pos_code: 'NY01' }
+].map(p => ({ ...p, is_available: true, created_at: new Date().toISOString() }));
+
+const LS_PRODUCTS = 'yujian_products_v1';
+const LS_ORDERS   = 'yujian_orders_v1';
+const LS_ADMIN    = 'yujian_admin_unlocked';
+
+/* ---------------------------------------------------------------------
+   2. 工具函式
+   --------------------------------------------------------------------- */
+const TZ = 'Asia/Taipei';
+const fmtDate = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+const fmtTime = new Intl.DateTimeFormat('zh-TW', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+const dateKey = d => fmtDate.format(new Date(d));      // 台灣日期 'YYYY-MM-DD'
+const timeHM  = d => fmtTime.format(new Date(d));      // 台灣時間 'HH:mm'
+const money   = n => '$' + Number(n || 0).toLocaleString('zh-TW');
+const clone   = x => JSON.parse(JSON.stringify(x));
+const errMsg  = e => (e && e.message) ? e.message : String(e);
+const itemsText = items => (items || [])
+  .map(it => `${it.name} ×${it.qty}` + (it.options && it.options.length ? `【${it.options.join('、')}】` : ''))
+  .join('；');
+
+function lsRead(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+function lsWrite(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function lsRemove(key) {
+  try { localStorage.removeItem(key); } catch (e) { /* 無痕模式等情況可忽略 */ }
+}
+
+/* ---------------------------------------------------------------------
+   3-1. 本機展示模式資料層（LocalStorage）
+        邏輯刻意與雲端 RPC 一致：檢查庫存、扣庫存、歸 0 自動停售、當日流水號
+   --------------------------------------------------------------------- */
+function makeLocalApi() {
+  const readProducts = () => lsRead(LS_PRODUCTS, null) || clone(DEMO_PRODUCTS);
+  const readOrders   = () => lsRead(LS_ORDERS, []);
+  const save = (products, orders) => {
+    const ok = (!products || lsWrite(LS_PRODUCTS, products)) && (!orders || lsWrite(LS_ORDERS, orders));
+    if (!ok) throw new Error('瀏覽器無法儲存資料（可能是無痕模式或儲存空間已滿）');
+  };
+  const nextId = list => list.reduce((m, x) => Math.max(m, x.id), 0) + 1;
+
+  return {
+    async init() {
+      if (!lsRead(LS_PRODUCTS, null)) lsWrite(LS_PRODUCTS, clone(DEMO_PRODUCTS));
+      if (!lsRead(LS_ORDERS, null))   lsWrite(LS_ORDERS, []);
+    },
+
+    async loadProducts() { return readProducts(); },
+
+    // 今日訂單 + 尚未處理完的舊訂單
+    async loadOrders() {
+      const today = dateKey(new Date());
+      return readOrders().filter(o => dateKey(o.created_at) === today || ACTIVE_STATUSES.includes(o.status));
+    },
+
+    async createOrder({ name, phone, orderType, pickupTime, items }) {
+      const products = readProducts();
+      const orders = readOrders();
+      if (!name)  throw new Error('請填寫訂購人稱呼');
+      if (!phone) throw new Error('請填寫聯絡電話');
+      if (!items.length) throw new Error('購物車是空的，請先選擇餐點');
+
+      // 同商品不同客製化合併計算庫存
+      const need = {};
+      items.forEach(it => { need[it.product_id] = (need[it.product_id] || 0) + it.qty; });
+      for (const id of Object.keys(need)) {
+        const p = products.find(x => x.id === Number(id));
+        if (!p) throw new Error(`找不到商品（編號 ${id}），請重新整理菜單`);
+        if (!p.is_available) throw new Error(`「${p.name}」目前已停售`);
+        if (p.stock < need[id]) throw new Error(p.stock === 0 ? `「${p.name}」已售完` : `「${p.name}」庫存不足，目前僅剩 ${p.stock} 份`);
+      }
+      for (const id of Object.keys(need)) {
+        const p = products.find(x => x.id === Number(id));
+        p.stock -= need[id];
+        if (p.stock <= 0) { p.stock = 0; p.is_available = false; }
+      }
+
+      const itemsOut = items.map(it => {
+        const p = products.find(x => x.id === it.product_id);
+        return { product_id: p.id, name: p.name, diet_type: p.diet_type, price: p.price,
+                 qty: it.qty, subtotal: p.price * it.qty, options: it.options || [] };
+      });
+      const total = itemsOut.reduce((s, it) => s + it.subtotal, 0);
+      const today = dateKey(new Date());
+      const seq = orders.filter(o => dateKey(o.created_at) === today).length + 1;
+      const orderNo = '#' + (seq < 1000 ? String(seq).padStart(3, '0') : String(seq));
+
+      const order = {
+        id: nextId(orders), order_no: orderNo, customer_name: name, customer_phone: phone,
+        order_type: orderType, pickup_time: pickupTime, items_json: itemsOut, total_amount: total,
+        status: 'PENDING', is_paid: false, pos_sync_status: false, created_at: new Date().toISOString()
+      };
+      orders.push(order);
+      save(products, orders);
+      return { order_id: order.id, order_no: orderNo, total_amount: total };
+    },
+
+    async cancelOrder(id) {
+      const products = readProducts();
+      const orders = readOrders();
+      const o = orders.find(x => x.id === id);
+      if (!o) throw new Error('找不到這筆訂單');
+      if (!ACTIVE_STATUSES.includes(o.status)) throw new Error(`訂單 ${o.order_no} 已完成或已取消，無法再取消`);
+      o.items_json.forEach(it => {
+        const p = products.find(x => x.id === it.product_id);
+        if (!p) return;
+        if (p.stock === 0) p.is_available = true;
+        p.stock += it.qty;
+      });
+      o.status = 'CANCELLED';
+      save(products, orders);
+      return o;
+    },
+
+    async updateOrder(id, patch) {
+      const orders = readOrders();
+      const o = orders.find(x => x.id === id);
+      if (!o) throw new Error('找不到這筆訂單');
+      ['status', 'is_paid', 'pos_sync_status'].forEach(k => { if (k in patch) o[k] = patch[k]; });
+      save(null, orders);
+      return o;
+    },
+
+    async adjustStock(id, delta) {
+      const products = readProducts();
+      const p = products.find(x => x.id === id);
+      if (!p) throw new Error(`找不到商品（編號 ${id}）`);
+      const next = Math.max(p.stock + delta, 0);
+      if (next === 0) p.is_available = false;
+      else if (p.stock === 0) p.is_available = true;
+      p.stock = next;
+      save(products, null);
+      return p;
+    },
+
+    async createProduct(row) {
+      const products = readProducts();
+      const p = { ...row, id: nextId(products), created_at: new Date().toISOString() };
+      products.push(p);
+      save(products, null);
+      return p;
+    },
+
+    async updateProduct(id, fields) {
+      const products = readProducts();
+      const p = products.find(x => x.id === id);
+      if (!p) throw new Error(`找不到商品（編號 ${id}）`);
+      Object.assign(p, fields);
+      save(products, null);
+      return p;
+    },
+
+    async deleteProduct(id) {
+      save(readProducts().filter(x => x.id !== id), null);
+    },
+
+    // 跨分頁同步：同一台電腦另一個分頁改了資料，這裡會收到 storage 事件
+    subscribeProducts(onChange) {
+      const h = e => { if (e.key === LS_PRODUCTS) onChange({ eventType: 'RELOAD' }); };
+      window.addEventListener('storage', h);
+      return () => window.removeEventListener('storage', h);
+    },
+    subscribeOrders(onChange) {
+      const h = e => { if (e.key === LS_ORDERS) onChange({ eventType: 'RELOAD' }); };
+      window.addEventListener('storage', h);
+      return () => window.removeEventListener('storage', h);
+    },
+
+    resetDemo() {
+      lsWrite(LS_PRODUCTS, clone(DEMO_PRODUCTS));
+      lsWrite(LS_ORDERS, []);
+    }
+  };
+}
+
+/* ---------------------------------------------------------------------
+   3-2. 雲端連線模式資料層（Supabase）
+        下單 / 取消 / 改庫存都走資料庫 RPC，金額與庫存由資料庫把關
+   --------------------------------------------------------------------- */
+function makeCloudApi(sb, onRealtimeStatus) {
+  const unwrap = ({ data, error }) => {
+    if (error) throw new Error(error.message || '雲端資料庫發生錯誤');
+    return data;
+  };
+  const subscribe = (table, onChange) => {
+    const ch = sb.channel('live-' + table)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, payload => onChange(payload))
+      .subscribe(status => onRealtimeStatus(table, status));
+    return () => sb.removeChannel(ch);
+  };
+
+  return {
+    async init() {},
+
+    async loadProducts() {
+      return unwrap(await sb.from('products').select('*').order('id'));
+    },
+
+    // 今日訂單 + 尚未處理完的舊訂單，依下單時間由早到晚
+    async loadOrders() {
+      const todayStart = new Date(dateKey(new Date()) + 'T00:00:00+08:00').toISOString();
+      return unwrap(await sb.from('orders').select('*')
+        .or(`created_at.gte."${todayStart}",status.in.(PENDING,PREPARING)`)
+        .order('created_at', { ascending: true }));
+    },
+
+    async createOrder({ name, phone, orderType, pickupTime, items }) {
+      return unwrap(await sb.rpc('create_bento_order', {
+        p_customer_name: name,
+        p_customer_phone: phone,
+        p_order_type: orderType,
+        p_pickup_time: pickupTime,
+        p_items: items
+      }));
+    },
+
+    async cancelOrder(id) {
+      return unwrap(await sb.rpc('cancel_bento_order', { p_order_id: id }));
+    },
+
+    async updateOrder(id, patch) {
+      return unwrap(await sb.from('orders').update(patch).eq('id', id).select().single());
+    },
+
+    async adjustStock(id, delta) {
+      return unwrap(await sb.rpc('adjust_product_stock', { p_product_id: id, p_delta: delta }));
+    },
+
+    async createProduct(row) {
+      return unwrap(await sb.from('products').insert(row).select().single());
+    },
+
+    async updateProduct(id, fields) {
+      return unwrap(await sb.from('products').update(fields).eq('id', id).select().single());
+    },
+
+    async deleteProduct(id) {
+      unwrap(await sb.from('products').delete().eq('id', id));
+    },
+
+    subscribeProducts: onChange => subscribe('products', onChange),
+    subscribeOrders:   onChange => subscribe('orders', onChange)
+  };
+}
+
+/* ---------------------------------------------------------------------
+   4. Vue App
+   --------------------------------------------------------------------- */
+createApp({
+  setup() {
+    /* ===== 4-1 系統狀態 ===== */
+    const cloudConfigured = Boolean(SUPABASE_URL.trim() && SUPABASE_ANON_KEY.trim());
+    const mode = ref(cloudConfigured ? 'cloud' : 'local');
+    const loading = ref(true);
+    const fatalError = ref('');
+    const realtimeStatus = reactive({ products: '', orders: '' });
+    const now = ref(Date.now());
+    let api = null;
+
+    const modeLabel = computed(() => {
+      if (mode.value === 'local') return '⚡ 本機展示模式';
+      return realtimeStatus.products === 'SUBSCRIBED' ? '☁️ 雲端即時連線中' : '☁️ 雲端連線中…';
+    });
+
+    const view = ref('customer');
+    const products = ref([]);
+    const orders = ref([]);
+
+    /* ===== 4-2 提示訊息 ===== */
+    const toast = ref(null);
+    let toastTimer = null;
+    function showToast(text, type = 'info', ms = 2500) {
+      toast.value = { text, type };
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.value = null; }, ms);
+    }
+
+    /* ===== 4-3 商品資料 ===== */
+    const sortProducts = list => [...list].sort((a, b) => {
+      const ca = CATEGORIES.indexOf(a.category), cb = CATEGORIES.indexOf(b.category);
+      return (ca === -1 ? 99 : ca) - (cb === -1 ? 99 : cb) || a.id - b.id;
+    });
+    const sortedProducts = computed(() => sortProducts(products.value));
+
+    // 每張餐點卡片的客製化選擇狀態
+    const cardOpts = reactive({});
+    function ensureCardOpts() {
+      products.value.forEach(p => {
+        if (!cardOpts[p.id]) cardOpts[p.id] = { rice: RICE_OPTIONS[0], extras: [] };
+      });
+    }
+
+    function setProducts(list) {
+      products.value = list;
+      ensureCardOpts();
+    }
+    function upsertProduct(p) {
+      const i = products.value.findIndex(x => x.id === p.id);
+      if (i === -1) products.value.push(p); else products.value[i] = p;
+      ensureCardOpts();
+    }
+    function removeProduct(id) {
+      products.value = products.value.filter(x => x.id !== id);
+    }
+    async function refreshProducts() {
+      try { setProducts(await api.loadProducts()); }
+      catch (e) { showToast('菜單更新失敗：' + errMsg(e), 'error'); }
+    }
+    function onProductsChange(payload) {
+      if (payload.eventType === 'DELETE') removeProduct(payload.old.id);
+      else if (payload.new && payload.new.id) upsertProduct(payload.new);
+      else refreshProducts();
+    }
+
+    /* =================================================================
+       視角 A：顧客點餐
+       ================================================================= */
+    const activeCategory = ref('全部');
+    const cart = ref([]);
+    const cartOpen = ref(false);
+    const submitting = ref(false);
+    const formError = ref('');
+    const successOrder = ref(null);
+    const form = reactive({
+      name: '', phone: '', orderType: ORDER_TYPES[0],
+      pickup: PICKUP_OPTIONS[0], pickupClock: '', pickupDateTime: ''
+    });
+
+    const filteredProducts = computed(() => activeCategory.value === '全部'
+      ? sortedProducts.value
+      : sortedProducts.value.filter(p => p.category === activeCategory.value));
+
+    const productById = id => products.value.find(p => p.id === id);
+    const isSoldOut = p => !p.is_available || p.stock <= 0;
+    const hasCustomization = p => CUSTOM_CATEGORIES.includes(p.category);
+    const cartQtyOf = id => cart.value.filter(l => l.productId === id).reduce((s, l) => s + l.qty, 0);
+    const remaining = p => p.stock - cartQtyOf(p.id);
+
+    const linePrice = line => (productById(line.productId) || line).price;
+    const cartCount = computed(() => cart.value.reduce((s, l) => s + l.qty, 0));
+    const cartTotal = computed(() => cart.value.reduce((s, l) => s + linePrice(l) * l.qty, 0));
+
+    function lineProblem(line) {
+      const p = productById(line.productId);
+      if (!p) return '此餐點已下架，請移除';
+      if (isSoldOut(p)) return '此餐點已售完，請移除';
+      if (cartQtyOf(p.id) > p.stock) return `剩餘份數不足（剩 ${p.stock} 份）`;
+      return '';
+    }
+
+    function toggleExtra(productId, option) {
+      const o = cardOpts[productId];
+      o.extras = o.extras.includes(option)
+        ? o.extras.filter(x => x !== option)
+        : EXTRA_OPTIONS.filter(x => x === option || o.extras.includes(x));   // 依固定順序排列
+    }
+
+    function addToCart(p) {
+      if (isSoldOut(p) || remaining(p) <= 0) return showToast('這個餐點已達今日剩餘份數', 'error');
+      const o = cardOpts[p.id];
+      const options = hasCustomization(p)
+        ? [...(o.rice !== RICE_OPTIONS[0] ? [o.rice] : []), ...o.extras]
+        : [];
+      const key = p.id + '|' + options.join(',');
+      const line = cart.value.find(l => l.key === key);
+      if (line) line.qty = Math.min(line.qty + 1, 99);
+      else cart.value.push({ key, productId: p.id, name: p.name, price: p.price, qty: 1, options });
+
+      if (p.category === '年菜預購') form.orderType = '年菜預訂';
+      cardOpts[p.id] = { rice: RICE_OPTIONS[0], extras: [] };   // 加入後重設選項
+      formError.value = '';
+      showToast(`已加入：${p.name}` + (options.length ? `（${options.join('、')}）` : ''));
+    }
+
+    function incLine(line) {
+      const p = productById(line.productId);
+      if (!p || remaining(p) <= 0 || line.qty >= 99) return showToast('已達今日剩餘份數', 'error');
+      line.qty++;
+    }
+    function decLine(line) {
+      if (line.qty > 1) line.qty--;
+      else removeLine(line);
+    }
+    function removeLine(line) {
+      cart.value = cart.value.filter(l => l !== line);
+      if (!cart.value.length) cartOpen.value = false;
+    }
+
+    // 組合「預計取餐時間」文字，驗證失敗會丟出錯誤訊息
+    function buildPickupText() {
+      if (form.orderType === '年菜預訂') {
+        if (!form.pickupDateTime) throw new Error('請選擇年菜預訂的取貨日期與時間');
+        const t = new Date(form.pickupDateTime);
+        if (isNaN(t) || t.getTime() < Date.now()) throw new Error('預訂取貨時間不能早於現在');
+        return '預訂 ' + form.pickupDateTime.replace('T', ' ').replace(/-/g, '/');
+      }
+      if (form.pickup === '指定時間') {
+        if (!form.pickupClock) throw new Error('請選擇指定的取餐時間');
+        return '指定 ' + form.pickupClock;
+      }
+      const m = { '15分鐘後': 15, '30分鐘後': 30 }[form.pickup];
+      return m ? `${form.pickup}（約 ${timeHM(Date.now() + m * 60000)}）` : form.pickup;
+    }
+
+    async function submitOrder() {
+      formError.value = '';
+      const phone = form.phone.replace(/[\s-]/g, '');
+      let pickupText;
+      try {
+        if (!cart.value.length) throw new Error('購物車是空的，請先選擇餐點');
+        if (!form.name) throw new Error('請填寫稱呼');
+        if (!/^0\d{8,9}$/.test(phone)) throw new Error('請填寫正確的聯絡電話（例：0912345678 或 02-23456789）');
+        const problem = cart.value.map(lineProblem).find(Boolean);
+        if (problem) throw new Error('購物車中有餐點需要調整：' + problem);
+        pickupText = buildPickupText();
+      } catch (e) {
+        formError.value = errMsg(e);
+        return;
+      }
+
+      submitting.value = true;
+      try {
+        const res = await api.createOrder({
+          name: form.name,
+          phone,
+          orderType: form.orderType,
+          pickupTime: pickupText,
+          items: cart.value.map(l => ({ product_id: l.productId, qty: l.qty, options: l.options }))
+        });
+        successOrder.value = {
+          order_no: res.order_no, total: res.total_amount,
+          name: form.name, orderType: form.orderType, pickupText
+        };
+        cart.value = [];
+        cartOpen.value = false;
+        form.pickup = PICKUP_OPTIONS[0];
+        form.pickupClock = '';
+        form.pickupDateTime = '';
+        if (form.orderType === '年菜預訂') form.orderType = ORDER_TYPES[0];
+      } catch (e) {
+        formError.value = errMsg(e);
+      } finally {
+        submitting.value = false;
+        refreshProducts();
+        if (adminUnlocked.value) refreshOrders({ notify: true });
+      }
+    }
+
+    /* =================================================================
+       視角 B：店家後台
+       ================================================================= */
+
+    /* ----- B-0 PIN 碼鎖 ----- */
+    const adminUnlocked = ref(lsRead(LS_ADMIN, false) === true);
+    const pinOpen = ref(false);
+    const pinInput = ref('');
+    const pinError = ref('');
+    const pinShake = ref(false);
+
+    function switchToCustomer() { view.value = 'customer'; }
+    function switchToAdmin() {
+      if (adminUnlocked.value) enterAdmin();
+      else { pinInput.value = ''; pinError.value = ''; pinOpen.value = true; }
+    }
+    function closePin() { pinOpen.value = false; pinInput.value = ''; }
+    function pinPress(d) {
+      if (pinInput.value.length >= 4) return;
+      pinInput.value += d;
+      pinError.value = '';
+      if (pinInput.value.length === 4) {
+        if (pinInput.value === ADMIN_PIN) {
+          adminUnlocked.value = true;
+          lsWrite(LS_ADMIN, true);
+          pinOpen.value = false;
+          pinInput.value = '';
+          ensureAudio();               // 點擊 PIN 是使用者操作，順便解鎖提示音
+          enterAdmin();
+        } else {
+          pinError.value = 'PIN 碼錯誤，請再試一次';
+          pinShake.value = true;
+          setTimeout(() => { pinShake.value = false; pinInput.value = ''; }, 600);
+        }
+      }
+    }
+
+    let unsubOrders = null;
+    let pollTimer = null;
+    let ordersLoaded = false;
+
+    function enterAdmin() {
+      view.value = 'admin';
+      cartOpen.value = false;
+      if (!ordersLoaded) refreshOrders({ notify: false });
+      if (!unsubOrders) unsubOrders = api.subscribeOrders(onOrdersChange);
+      // 雲端模式每 60 秒補抓一次，避免 Realtime 斷線漏單
+      if (mode.value === 'cloud' && !pollTimer) {
+        pollTimer = setInterval(() => { refreshOrders({ notify: true }); refreshProducts(); }, 60000);
+      }
+    }
+    function lockAdmin() {
+      adminUnlocked.value = false;
+      lsRemove(LS_ADMIN);
+      view.value = 'customer';
+      if (unsubOrders) { unsubOrders(); unsubOrders = null; }
+      clearInterval(pollTimer); pollTimer = null;
+      orders.value = [];               // 鎖定後清掉畫面上的顧客資料
+      knownOrderIds.clear();
+      ordersLoaded = false;
+    }
+
+    /* ----- B-1 訂單資料與新訂單通知 ----- */
+    const knownOrderIds = new Set();
+    const flashIds = reactive({});
+    const busy = reactive({});
+    const orderFilter = ref('active');
+
+    function notifyNewOrder(o) {
+      playDingDong();
+      flashIds[o.id] = true;
+      setTimeout(() => { delete flashIds[o.id]; }, 6500);
+      showToast(`🔔 新訂單 ${o.order_no}　${o.customer_name}`, 'alert', 5000);
+    }
+
+    function upsertOrder(o) {
+      const i = orders.value.findIndex(x => x.id === o.id);
+      if (i === -1) orders.value.push(o); else orders.value[i] = { ...orders.value[i], ...o };
+      knownOrderIds.add(o.id);
+    }
+
+    async function refreshOrders({ notify }) {
+      try {
+        const list = await api.loadOrders();
+        const fresh = ordersLoaded ? list.filter(o => !knownOrderIds.has(o.id) && o.status === 'PENDING') : [];
+        orders.value = list;
+        list.forEach(o => knownOrderIds.add(o.id));
+        ordersLoaded = true;
+        if (notify) fresh.forEach(notifyNewOrder);
+      } catch (e) {
+        showToast('訂單更新失敗：' + errMsg(e), 'error');
+      }
+    }
+
+    function onOrdersChange(payload) {
+      if (!adminUnlocked.value) return;
+      if (payload.eventType === 'INSERT' && payload.new) {
+        const isNew = !knownOrderIds.has(payload.new.id);
+        upsertOrder(payload.new);
+        if (isNew) notifyNewOrder(payload.new);
+      } else if (payload.eventType === 'UPDATE' && payload.new) {
+        upsertOrder(payload.new);
+      } else {
+        refreshOrders({ notify: true });
+      }
+    }
+
+    /* ----- B-2 數據看板 ----- */
+    const todayKey = computed(() => dateKey(now.value));
+    const byTimeAsc = (a, b) => new Date(a.created_at) - new Date(b.created_at);
+    const todayOrders = computed(() => orders.value.filter(o => dateKey(o.created_at) === todayKey.value).sort(byTimeAsc));
+    const todayValidOrders = computed(() => todayOrders.value.filter(o => o.status !== 'CANCELLED'));
+    const todayRevenue = computed(() => todayValidOrders.value.reduce((s, o) => s + o.total_amount, 0));
+    const todayPaidRevenue = computed(() => todayValidOrders.value.filter(o => o.is_paid).reduce((s, o) => s + o.total_amount, 0));
+    const todayCompletedCount = computed(() => todayOrders.value.filter(o => o.status === 'COMPLETED').length);
+    const activeOrders = computed(() => orders.value.filter(o => ACTIVE_STATUSES.includes(o.status)));
+
+    /* ----- B-3 KDS 訂單佇列：嚴格 created_at ASC ----- */
+    const ordersFor = key => {
+      if (key === 'active') return activeOrders.value;
+      if (key === 'done') return todayOrders.value.filter(o => !ACTIVE_STATUSES.includes(o.status));
+      const ids = new Set(todayOrders.value.map(o => o.id));
+      return [...todayOrders.value, ...activeOrders.value.filter(o => !ids.has(o.id))];
+    };
+    const kdsOrders = computed(() => [...ordersFor(orderFilter.value)].sort(byTimeAsc));
+    const filterCount = key => ordersFor(key).length;
+
+    const orderTimeLabel = t => dateKey(t) === todayKey.value
+      ? timeHM(t)
+      : dateKey(t).slice(5).replace('-', '/') + ' ' + timeHM(t);
+
+    async function withBusy(key, fn) {
+      if (busy[key]) return;
+      busy[key] = true;
+      try { await fn(); }
+      catch (e) { showToast(errMsg(e), 'error', 4000); }
+      finally { delete busy[key]; }
+    }
+
+    const acceptOrder = o => withBusy(o.id, async () => {
+      upsertOrder(await api.updateOrder(o.id, { status: 'PREPARING' }));
+    });
+    const completeOrder = o => withBusy(o.id, async () => {
+      upsertOrder(await api.updateOrder(o.id, { status: 'COMPLETED', is_paid: true }));
+      showToast(`✅ ${o.order_no} 已完成取餐`);
+    });
+    const cancelOrder = o => {
+      if (!confirm(`確定要取消訂單 ${o.order_no}（${o.customer_name}）嗎？\n\n取消後便當份數會自動加回庫存。`)) return;
+      return withBusy(o.id, async () => {
+        await api.cancelOrder(o.id);
+        upsertOrder({ id: o.id, status: 'CANCELLED' });
+        await refreshProducts();
+        showToast(`已取消訂單 ${o.order_no}`);
+      });
+    };
+
+    /* ----- B-4 庫存與菜單管理 ----- */
+    const toggleAvailable = p => withBusy('p' + p.id, async () => {
+      const next = !p.is_available;
+      upsertProduct(await api.updateProduct(p.id, { is_available: next }));
+      if (next && p.stock <= 0) showToast('已上架，但庫存為 0，顧客仍會看到「已售完」，請記得補庫存', 'alert', 4500);
+    });
+
+    const adjustStock = (p, delta) => withBusy('p' + p.id, async () => {
+      upsertProduct(await api.adjustStock(p.id, delta));
+    });
+
+    function setStockPrompt(p) {
+      const input = prompt(`請輸入「${p.name}」的新庫存數量：`, String(p.stock));
+      if (input === null) return;
+      const n = Number(input.trim());
+      if (!Number.isInteger(n) || n < 0 || n > 9999) return showToast('請輸入 0 ~ 9999 的整數', 'error');
+      if (n === p.stock) return;
+      adjustStock(p, n - p.stock);
+    }
+
+    const editForm = ref(null);
+    const editError = ref('');
+    const editSaving = ref(false);
+
+    function openNewProduct() {
+      editError.value = '';
+      editForm.value = { id: null, name: '', price: 100, stock: 30, category: CATEGORIES[0], diet_type: DIET_TYPES[0], pos_code: '' };
+    }
+    function openEditProduct(p) {
+      editError.value = '';
+      editForm.value = { id: p.id, name: p.name, price: p.price, category: p.category || CATEGORIES[0],
+                         diet_type: p.diet_type || DIET_TYPES[0], pos_code: p.pos_code || '' };
+    }
+
+    async function saveProductForm() {
+      const f = editForm.value;
+      editError.value = '';
+      if (!f.name) return (editError.value = '請填寫名稱');
+      if (!Number.isInteger(f.price) || f.price < 0) return (editError.value = '價格請填 0 以上的整數');
+      if (!f.id && (!Number.isInteger(f.stock) || f.stock < 0)) return (editError.value = '庫存請填 0 以上的整數');
+
+      const fields = { name: f.name, price: f.price, category: f.category, diet_type: f.diet_type, pos_code: f.pos_code || null };
+      editSaving.value = true;
+      try {
+        const saved = f.id
+          ? await api.updateProduct(f.id, fields)
+          : await api.createProduct({ ...fields, stock: f.stock, is_available: f.stock > 0 });
+        upsertProduct(saved);
+        editForm.value = null;
+        showToast(f.id ? '已儲存變更' : `已新增：${f.name}`);
+      } catch (e) {
+        editError.value = errMsg(e);
+      } finally {
+        editSaving.value = false;
+      }
+    }
+
+    async function deleteProductForm() {
+      const f = editForm.value;
+      if (!confirm(`確定要刪除「${f.name}」嗎？\n\n刪除後無法復原（已成立的訂單不受影響）。\n若只是今天不賣，建議改用「已停售」。`)) return;
+      editSaving.value = true;
+      try {
+        await api.deleteProduct(f.id);
+        removeProduct(f.id);
+        editForm.value = null;
+        showToast(`已刪除：${f.name}`);
+      } catch (e) {
+        editError.value = errMsg(e);
+      } finally {
+        editSaving.value = false;
+      }
+    }
+
+    function resetDemoData() {
+      if (!confirm('確定要重設展示資料嗎？\n\n所有本機訂單會被清空，菜單與庫存恢復成預設值。')) return;
+      api.resetDemo();
+      knownOrderIds.clear();
+      ordersLoaded = false;
+      refreshProducts();
+      refreshOrders({ notify: false });
+      showToast('已重設展示資料');
+    }
+
+    /* ----- B-5 匯出今日 Excel 報表（SheetJS） ----- */
+    function exportExcel() {
+      if (!window.XLSX) return showToast('Excel 套件載入失敗，請檢查網路後重新整理', 'error');
+      const list = todayOrders.value;
+      if (!list.length) return showToast('今天還沒有訂單可以匯出', 'error');
+
+      const header = ['流水號', '下單時間', '取餐方式', '預計取餐', '顧客稱呼', '聯絡電話', '購買明細', '金額', '付款', '狀態'];
+      const rows = list.map(o => [
+        o.order_no, timeHM(o.created_at), o.order_type, o.pickup_time,
+        o.customer_name, o.customer_phone, itemsText(o.items_json), o.total_amount,
+        o.is_paid ? '已收款' : '未收款', STATUS_STYLE[o.status].label.replace(/^\S+\s/, '')
+      ]);
+      rows.push([]);
+      rows.push(['', '', '', '', '', '', '有效營業額（不含已取消）', todayRevenue.value]);
+      rows.push(['', '', '', '', '', '', '已收款金額', todayPaidRevenue.value]);
+
+      const ws1 = XLSX.utils.aoa_to_sheet([header, ...rows]);
+      ws1['!cols'] = [8, 10, 10, 22, 12, 14, 50, 10, 8, 8].map(wch => ({ wch }));
+
+      // 第二張工作表：品項銷售統計（不含已取消）
+      const stat = {};
+      todayValidOrders.value.forEach(o => (o.items_json || []).forEach(it => {
+        stat[it.name] = stat[it.name] || { qty: 0, amount: 0 };
+        stat[it.name].qty += it.qty;
+        stat[it.name].amount += it.subtotal;
+      }));
+      const ws2 = XLSX.utils.aoa_to_sheet([
+        ['品項', '份數', '金額'],
+        ...Object.entries(stat).sort((a, b) => b[1].qty - a[1].qty).map(([n, s]) => [n, s.qty, s.amount])
+      ]);
+      ws2['!cols'] = [{ wch: 36 }, { wch: 8 }, { wch: 10 }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws1, '今日訂單');
+      XLSX.utils.book_append_sheet(wb, ws2, '品項統計');
+      XLSX.writeFile(wb, `${SHOP_NAME}_營收報表_${todayKey.value}.xlsx`);
+      showToast('📊 報表已下載');
+    }
+
+    /* ----- B-6 店內點餐 QR Code（qrcodejs） ----- */
+    const qrOpen = ref(false);
+    const qrBox = ref(null);
+    const orderUrl = location.href.split(/[?#]/)[0];
+    const isLocalhostUrl = /^(file:|https?:\/\/(localhost|127\.0\.0\.1|\[::1\]))/.test(orderUrl);
+    const lineShareUrl = 'https://line.me/R/msg/text/?' + encodeURIComponent(`${SHOP_NAME} 線上點餐 🍱\n${orderUrl}`);
+
+    async function openQr() {
+      if (!window.QRCode) return showToast('QR Code 套件載入失敗，請檢查網路後重新整理', 'error');
+      qrOpen.value = true;
+      await nextTick();
+      qrBox.value.innerHTML = '';
+      new QRCode(qrBox.value, { text: orderUrl, width: 256, height: 256, correctLevel: QRCode.CorrectLevel.M });
+    }
+    function qrDataUrl() {
+      const canvas = qrBox.value && qrBox.value.querySelector('canvas');
+      return canvas ? canvas.toDataURL('image/png') : '';
+    }
+    function downloadQr() {
+      const url = qrDataUrl();
+      if (!url) return showToast('QR Code 尚未產生完成', 'error');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${SHOP_NAME}_點餐QRCode.png`;
+      a.click();
+    }
+    function printQr() {
+      const url = qrDataUrl();
+      const w = window.open('', '_blank');
+      if (!w || !url) return showToast('無法開啟列印視窗，請允許彈出視窗後再試', 'error');
+      w.document.write(`<!DOCTYPE html><html lang="zh-Hant-TW"><head><meta charset="UTF-8"><title>${SHOP_NAME} 掃碼點餐</title></head>
+        <body style="font-family:'Noto Sans TC','Microsoft JhengHei',sans-serif;text-align:center;padding:48px">
+        <h1 style="font-size:44px;margin:0">${SHOP_NAME}</h1>
+        <p style="font-size:30px;margin:12px 0 28px">📱 手機掃碼 線上點餐</p>
+        <img src="${url}" style="width:360px;height:360px">
+        <p style="font-size:22px;margin-top:28px">點餐後請記下取餐號碼，叫號時取餐</p>
+        \x3C/body>\x3C/html>`);
+      w.document.close();
+      setTimeout(() => w.print(), 400);
+    }
+    async function copyOrderUrl() {
+      try {
+        await navigator.clipboard.writeText(orderUrl);
+        showToast('🔗 已複製點餐連結');
+      } catch (e) {
+        prompt('請手動複製以下連結：', orderUrl);
+      }
+    }
+
+    /* ----- B-7 新訂單提示音（Web Audio API 叮咚聲） ----- */
+    let audioCtx = null;
+    const soundReady = ref(false);
+
+    function ensureAudio() {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      if (!audioCtx) {
+        audioCtx = new AC();
+        audioCtx.onstatechange = () => { soundReady.value = audioCtx.state === 'running'; };
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+      soundReady.value = audioCtx.state === 'running';
+      return audioCtx;
+    }
+
+    function tone(freq, start, duration) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.6, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(start);
+      osc.stop(start + duration + 0.05);
+    }
+
+    function playDingDong() {
+      if (!audioCtx || audioCtx.state !== 'running') return;   // 尚未解鎖時畫面上會有提示橫幅
+      const t = audioCtx.currentTime + 0.05;
+      tone(1318.5, t, 0.7);          // 叮（E6）
+      tone(1046.5, t + 0.4, 1.1);    // 咚（C6）
+    }
+
+    function testSound() {
+      ensureAudio();
+      if (!audioCtx) return showToast('這個瀏覽器不支援提示音', 'error');
+      // resume 可能需要一點時間，稍候再播
+      setTimeout(() => {
+        if (audioCtx.state === 'running') { playDingDong(); showToast('🔊 提示音已啟用'); }
+        else showToast('提示音仍被瀏覽器封鎖，請再點一次', 'error');
+      }, 150);
+    }
+
+    /* ===== 4-4 鍵盤操作（PIN 實體鍵盤輸入、Esc 關閉視窗） ===== */
+    function onKeydown(e) {
+      if (pinOpen.value) {
+        if (/^\d$/.test(e.key)) pinPress(e.key);
+        else if (e.key === 'Backspace') pinInput.value = pinInput.value.slice(0, -1);
+        else if (e.key === 'Escape') closePin();
+        return;
+      }
+      if (e.key !== 'Escape') return;
+      if (qrOpen.value) qrOpen.value = false;
+      else if (editForm.value) editForm.value = null;
+      else if (successOrder.value) successOrder.value = null;
+      else if (cartOpen.value) cartOpen.value = false;
+    }
+
+    /* ===== 4-5 啟動 ===== */
+    onMounted(async () => {
+      try {
+        if (mode.value === 'cloud') {
+          if (!window.supabase || !window.supabase.createClient) {
+            throw new Error('Supabase 套件載入失敗，請檢查網路連線後重新整理。');
+          }
+          const sb = window.supabase.createClient(SUPABASE_URL.trim(), SUPABASE_ANON_KEY.trim());
+          api = makeCloudApi(sb, (table, status) => { realtimeStatus[table] = status; });
+        } else {
+          api = makeLocalApi();
+        }
+        await api.init();
+        setProducts(await api.loadProducts());
+        api.subscribeProducts(onProductsChange);
+      } catch (e) {
+        fatalError.value = (mode.value === 'cloud'
+          ? '雲端資料庫連線失敗，請確認 SUPABASE_URL、SUPABASE_ANON_KEY 是否正確，以及 supabase_init.sql 是否已執行。\n\n'
+          : '') + '錯誤訊息：' + errMsg(e);
+      } finally {
+        loading.value = false;
+      }
+      if (fatalError.value) return;
+
+      // 網址帶 ?admin=1 直接進入後台（未解鎖則跳出 PIN 碼）
+      if (new URLSearchParams(location.search).get('admin') === '1') switchToAdmin();
+
+      // 量測頂部導覽列高度，讓分類篩選列黏在導覽列正下方（手機版導覽列可能換行變高）
+      const header = document.querySelector('header');
+      const syncHeaderHeight = () => document.documentElement.style.setProperty('--hdr', header.offsetHeight + 'px');
+      syncHeaderHeight();
+      if (window.ResizeObserver) new ResizeObserver(syncHeaderHeight).observe(header);
+
+      setInterval(() => { now.value = Date.now(); }, 30000);
+      window.addEventListener('keydown', onKeydown);
+      // 後台已解鎖時，任何點擊都順便解鎖提示音
+      document.addEventListener('pointerdown', () => { if (adminUnlocked.value) ensureAudio(); });
+    });
+
+    return {
+      // 常數
+      SHOP_NAME, CATEGORIES, DIET_TYPES, RICE_OPTIONS, EXTRA_OPTIONS, ORDER_TYPES, PICKUP_OPTIONS,
+      ORDER_FILTERS, STATUS_STYLE,
+      // 系統
+      mode, modeLabel, loading, fatalError, view, toast, money,
+      // 顧客端
+      products, sortedProducts, filteredProducts, activeCategory, cardOpts,
+      isSoldOut, hasCustomization, remaining, toggleExtra, addToCart,
+      cart, cartOpen, cartCount, cartTotal, linePrice, lineProblem, incLine, decLine, removeLine,
+      form, formError, submitting, submitOrder, successOrder,
+      // PIN
+      adminUnlocked, pinOpen, pinInput, pinError, pinShake, pinPress, closePin,
+      switchToCustomer, switchToAdmin, lockAdmin,
+      // 後台
+      todayRevenue, todayPaidRevenue, todayValidOrders, todayCompletedCount, activeOrders,
+      orderFilter, kdsOrders, filterCount, orderTimeLabel, flashIds, busy,
+      acceptOrder, completeOrder, cancelOrder,
+      toggleAvailable, adjustStock, setStockPrompt,
+      editForm, editError, editSaving, openNewProduct, openEditProduct, saveProductForm, deleteProductForm,
+      resetDemoData, exportExcel,
+      qrOpen, qrBox, orderUrl, isLocalhostUrl, lineShareUrl, openQr, downloadQr, printQr, copyOrderUrl,
+      soundReady, testSound
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
